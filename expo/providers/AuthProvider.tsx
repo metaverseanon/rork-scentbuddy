@@ -8,6 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { ONBOARDING_QUIZ_KEY, QuizResults } from '@/constants/quiz';
 import { trackReferralSignUp, generateReferralCode } from '@/lib/referrals';
+import { TikTokEvents } from '@/lib/tiktok';
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<Session | null>(null);
@@ -52,6 +53,9 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
+      if (data.user) {
+        void TikTokEvents.login(data.user.id, data.user.email ?? email);
+      }
       return data;
     },
   });
@@ -100,6 +104,8 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
             console.log('Failed to clear quiz data:', e);
           }
         }
+
+        void TikTokEvents.registration(data.user.id, email);
 
         if (referralCode?.trim()) {
           try {

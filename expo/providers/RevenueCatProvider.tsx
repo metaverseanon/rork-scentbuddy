@@ -9,6 +9,7 @@ import Purchases, {
 import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/providers/AuthProvider';
+import { TikTokEvents } from '@/lib/tiktok';
 
 function getRCApiKey(): string {
   if (__DEV__ || Platform.OS === 'web') {
@@ -155,6 +156,22 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
       if (!rcConfigured) throw new Error('RevenueCat not configured');
       console.log('[RevenueCat] Purchasing package:', pkg.identifier);
       const { customerInfo } = await Purchases.purchasePackage(pkg);
+      try {
+        const price = pkg.product.price;
+        const currency = pkg.product.currencyCode ?? 'USD';
+        const productId = pkg.product.identifier;
+        const isTrial = !!pkg.product.introPrice && pkg.product.introPrice.price === 0;
+        if (user?.id) {
+          if (isTrial) {
+            void TikTokEvents.startTrial(user.id, price, currency, productId);
+          } else {
+            void TikTokEvents.subscribe(user.id, price, currency, productId);
+          }
+          void TikTokEvents.purchase(user.id, price, currency, productId);
+        }
+      } catch (e) {
+        console.log('[RevenueCat] TikTok track error:', e);
+      }
       return customerInfo;
     },
     onSuccess: (info) => {
