@@ -155,23 +155,41 @@ export default function HomeScreen() {
   const newsQuery = useQuery({
     queryKey: ['fragrance-news'],
     queryFn: async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
       try {
-        const response = await fetch('https://scentbuddy.io/api/fragrance-news');
-        if (!response.ok) return [];
+        const response = await fetch('https://scentbuddy.io/api/fragrance-news', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`News request failed: ${response.status}`);
+        }
         const data = await response.json();
-        return (data.articles ?? []) as NewsArticle[];
+        const articles = (data?.articles ?? []) as NewsArticle[];
+        return articles;
       } catch (err) {
+        clearTimeout(timeoutId);
         console.log('News fetch error:', err);
-        return [];
+        throw err;
       }
     },
     staleTime: 1000 * 60 * 60,
+    gcTime: 1000 * 60 * 60 * 24,
+    retry: 2,
+    retryDelay: attempt => Math.min(1000 * 2 ** attempt, 8000),
+    placeholderData: keepPreviousData,
   });
 
   const collection = useMemo(() => collectionQuery.data ?? [], [collectionQuery.data]);
   const wishlist = useMemo(() => wishlistQuery.data ?? [], [wishlistQuery.data]);
   const wears = useMemo(() => wearsQuery.data ?? [], [wearsQuery.data]);
   const newsArticles = useMemo(() => newsQuery.data ?? [], [newsQuery.data]);
+
+  useEffect(() => {
+    if (newsArticles.length === 0) return;
+    if (activeNewsIndex >= newsArticles.length) {
+      setActiveNewsIndex(0);
+    }
+  }, [newsArticles.length, activeNewsIndex]);
 
   useEffect(() => {
     if (newsArticles.length <= 1) return;
@@ -306,7 +324,7 @@ export default function HomeScreen() {
     );
   }
 
-  const activeArticle = newsArticles[activeNewsIndex];
+  const activeArticle = newsArticles[activeNewsIndex] ?? newsArticles[0];
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
