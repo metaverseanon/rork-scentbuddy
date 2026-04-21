@@ -1,6 +1,9 @@
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
+
+const INSTALL_TRACKED_KEY = 'tiktok_install_tracked_v1';
 
 type TikTokEventName =
   | 'CompleteRegistration'
@@ -132,4 +135,20 @@ export const TikTokEvents = {
       user: { external_id: userId },
       properties: { value, currency, content_id: productId, content_type: 'product' },
     }),
+  launchApp: () => trackTikTokEvent({ event: 'LaunchAPP' }),
+  install: () => trackTikTokEvent({ event: 'InstallApp' }),
 };
+
+export async function trackAppOpen(): Promise<void> {
+  if (Platform.OS === 'web') return;
+  try {
+    const alreadyInstalled = await AsyncStorage.getItem(INSTALL_TRACKED_KEY);
+    if (!alreadyInstalled) {
+      await TikTokEvents.install();
+      await AsyncStorage.setItem(INSTALL_TRACKED_KEY, '1');
+    }
+    await TikTokEvents.launchApp();
+  } catch (e) {
+    console.log('[TikTok] trackAppOpen error:', e);
+  }
+}
