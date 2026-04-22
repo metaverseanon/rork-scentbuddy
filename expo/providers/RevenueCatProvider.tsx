@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
-import { Platform } from 'react-native';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { AppState, Platform } from 'react-native';
 import Purchases, {
   CustomerInfo,
   PurchasesOffering,
@@ -89,20 +89,25 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
       }
     },
     staleTime: 1000 * 60 * 5,
-    retry: 2,
-    retryDelay: 2000,
+    retry: 5,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
     enabled: rcConfigured,
+    refetchOnWindowFocus: false,
   });
 
+  const loggedInUserRef = useRef<string | null>(null);
   useEffect(() => {
     if (!rcConfigured || !user?.id) return;
+    if (loggedInUserRef.current === user.id) return;
     let cancelled = false;
     const loginToRC = async () => {
       try {
         const { customerInfo } = await Purchases.logIn(user.id);
         if (!cancelled) {
+          loggedInUserRef.current = user.id;
           console.log('[RevenueCat] Logged in as:', user.id);
           queryClient.setQueryData(['rc-customer-info'], customerInfo);
+          void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
         }
       } catch (e) {
         if (!cancelled) {
@@ -113,6 +118,18 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
     void loginToRC();
     return () => { cancelled = true; };
   }, [user?.id, queryClient]);
+
+  useEffect(() => {
+    if (!rcConfigured) return;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        console.log('[RevenueCat] App became active, refreshing offerings & customer info');
+        void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
+        void queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] });
+      }
+    });
+    return () => sub.remove();
+  }, [queryClient]);
 
   useEffect(() => {
     if (!rcConfigured) return;
