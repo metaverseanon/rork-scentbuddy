@@ -12,7 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
-import { CaretLeft, Diamond, Sparkle, Tag, Crown, ShareNetwork } from 'phosphor-react-native';
+import { CaretLeft, Diamond, Sparkle, Tag, Crown, ShareNetwork, ArrowRight } from 'phosphor-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuth } from '@/providers/AuthProvider';
 import { useTheme } from '@/providers/ThemeProvider';
@@ -377,11 +377,26 @@ export default function StatisticsScreen() {
           )}
         </View>
 
-        <View style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => {
+            void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            router.push('/fragrance-dna' as any);
+          }}
+          style={[styles.sectionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          testID="open-fragrance-dna"
+        >
           <View style={styles.sectionHeader}>
             <Sparkle size={18} color={colors.accent} />
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Fragrance DNA</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]}>Fragrance DNA</Text>
+            <View style={[styles.dnaOpenBadge, { backgroundColor: colors.accent }]}>
+              <Text style={styles.dnaOpenBadgeText}>Share card</Text>
+              <ArrowRight size={12} color="#0d0905" weight="bold" />
+            </View>
           </View>
+          <Text style={[styles.sectionSub, { color: colors.subtext }]}>
+            A shareable portrait of your scent identity — tap to open.
+          </Text>
           <View style={styles.dnaChips}>
             {fragranceDNA.slice(0, 8).map(([note, count]) => (
               <View key={note} style={[styles.dnaChip, { backgroundColor: colors.chip, borderColor: colors.border }]}>
@@ -417,7 +432,11 @@ export default function StatisticsScreen() {
               )}
             </View>
           )}
-        </View>
+          <View style={[styles.dnaCta, { borderTopColor: colors.border }]}>
+            <Text style={[styles.dnaCtaText, { color: colors.accent }]}>Open shareable DNA card</Text>
+            <ArrowRight size={14} color={colors.accent} weight="bold" />
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.twoColRow}>
           <View style={[styles.colCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -567,4 +586,32 @@ const styles = StyleSheet.create({
   topRatedBadgeText: { color: '#fff', fontSize: 18, fontWeight: '700' as const },
   topRatedName: { fontSize: 15, fontWeight: '700' as const },
   topRatedBrand: { fontSize: 13, marginTop: 2 },
+  dnaOpenBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 100,
+  },
+  dnaOpenBadgeText: {
+    color: '#0d0905',
+    fontSize: 11,
+    fontWeight: '800' as const,
+    letterSpacing: 0.3,
+  },
+  dnaCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+  },
+  dnaCtaText: {
+    fontSize: 13,
+    fontWeight: '700' as const,
+    letterSpacing: 0.3,
+  },
 });

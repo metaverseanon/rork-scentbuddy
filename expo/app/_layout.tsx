@@ -81,6 +81,7 @@ function RootLayoutNav() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ headerShown: false, presentation: "modal" }} />
         <Stack.Screen name="statistics" options={{ headerShown: false, presentation: "card" }} />
+        <Stack.Screen name="fragrance-dna" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="diary" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="compare" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="scanner" options={{ headerShown: false, presentation: "fullScreenModal" }} />
