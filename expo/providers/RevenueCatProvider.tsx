@@ -41,9 +41,9 @@ if (RC_API_KEY) {
 }
 
 export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
-  const { user, updateProfile } = useAuth();
+  const { user, updateProfile, profile } = useAuth();
   const queryClient = useQueryClient();
-  const [isPro, setIsPro] = useState(false);
+  const [hasRcEntitlement, setHasRcEntitlement] = useState(false);
 
   const customerInfoQuery = useQuery({
     queryKey: ['rc-customer-info'],
@@ -157,16 +157,30 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
     }
     const hasEntitlement = typeof info.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
     console.log('[RevenueCat] Has Pro entitlement:', hasEntitlement);
-    setIsPro(hasEntitlement);
+    setHasRcEntitlement(hasEntitlement);
   }, [customerInfoQuery.data]);
 
+  const hasProfilePro = useMemo(() => {
+    if (!profile?.is_pro) return false;
+    if (profile.pro_expires_at) {
+      const exp = new Date(profile.pro_expires_at).getTime();
+      if (!Number.isNaN(exp) && exp < Date.now()) {
+        console.log('[RevenueCat] profile.is_pro is true but pro_expires_at is in the past');
+        return false;
+      }
+    }
+    return true;
+  }, [profile?.is_pro, profile?.pro_expires_at]);
+
+  const isPro = hasRcEntitlement || hasProfilePro;
+
   useEffect(() => {
-    if (user?.id && isPro) {
+    if (user?.id && hasRcEntitlement) {
       updateProfile({ is_pro: true }).catch((e) =>
         console.log('[RevenueCat] Failed to sync pro status to profile:', e)
       );
     }
-  }, [isPro, user?.id, updateProfile]);
+  }, [hasRcEntitlement, user?.id, updateProfile]);
 
   const purchaseMutation = useMutation({
     mutationFn: async (pkg: PurchasesPackage) => {
