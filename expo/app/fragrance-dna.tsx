@@ -415,10 +415,7 @@ export default function FragranceDNAScreen() {
             <View style={styles.footer}>
               <View style={styles.footerDivider} />
               <View style={styles.footerRow}>
-                <View>
-                  <Text style={styles.footerBrand}>SCENTBUDDY</Text>
-                  <Text style={styles.footerUrl}>scentbuddy.io</Text>
-                </View>
+                <Text style={styles.footerBrand}>SCENTBUDDY</Text>
                 <Text style={styles.footerCta}>Build yours →</Text>
               </View>
             </View>
