@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import * as Application from 'expo-application';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '@/lib/supabase';
 
@@ -77,6 +78,12 @@ export async function trackTikTokEvent(opts: TrackOptions): Promise<void> {
     const payload = {
       event: opts.event,
       event_id: opts.eventId ?? makeEventId(),
+      platform: Platform.OS,
+      app_version:
+        (Constants.expoConfig?.version as string | undefined) ??
+        Application.nativeApplicationVersion ??
+        undefined,
+      os_version: String(Platform.Version ?? ''),
       user: {
         external_id: opts.user?.external_id ?? user?.id,
         email: opts.user?.email ?? user?.email,

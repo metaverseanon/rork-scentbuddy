@@ -38,6 +38,12 @@
 
 const TIKTOK_ENDPOINT = 'https://business-api.tiktok.com/open_api/v1.3/event/track/';
 
+// Hardcoded fallbacks so TikTok's app verification scanner always sees the correct IDs.
+const DEFAULT_TIKTOK_APP_ID = '7630509545810411528';
+const IOS_APP_STORE_ID = '6761390616';
+const IOS_BUNDLE_ID = 'app.rork.0kxdwz3d5g57j5m9vjhxs';
+const ANDROID_PACKAGE = 'app.rork.0kxdwz3d5g57j5m9vjhxs';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -79,10 +85,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     const accessToken = Deno.env.get('TIKTOK_ACCESS_TOKEN');
-    const appId = Deno.env.get('TIKTOK_APP_ID');
+    const appId = Deno.env.get('TIKTOK_APP_ID') ?? DEFAULT_TIKTOK_APP_ID;
 
     if (!accessToken) return json({ error: 'TIKTOK_ACCESS_TOKEN not configured' }, 500);
-    if (!appId) return json({ error: 'TIKTOK_APP_ID not configured' }, 500);
 
     const body = await req.json().catch(() => ({}));
     const event: string | undefined = body?.event;
@@ -129,6 +134,28 @@ Deno.serve(async (req: Request) => {
       ];
     }
 
+    const platform: string = (body?.platform as string | undefined) ?? 'ios';
+    const appVersion: string | undefined = body?.app_version;
+    const osVersion: string | undefined = body?.os_version;
+
+    const appInfo =
+      platform === 'android'
+        ? {
+            app_id: ANDROID_PACKAGE,
+            app_name: 'ScentBuddy',
+            app_version: appVersion,
+            platform: 'Android',
+            os_version: osVersion,
+          }
+        : {
+            app_id: IOS_APP_STORE_ID,
+            app_name: 'ScentBuddy',
+            app_bundle_id: IOS_BUNDLE_ID,
+            app_version: appVersion,
+            platform: 'iOS',
+            os_version: osVersion,
+          };
+
     const payload = {
       event_source: 'app',
       event_source_id: appId,
@@ -139,6 +166,7 @@ Deno.serve(async (req: Request) => {
           event_id: eventId,
           user,
           properties,
+          app: appInfo,
         },
       ],
     };
