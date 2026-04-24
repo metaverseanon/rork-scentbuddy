@@ -9,6 +9,7 @@ import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { ONBOARDING_QUIZ_KEY, QuizResults } from '@/constants/quiz';
 import { trackReferralSignUp, generateReferralCode } from '@/lib/referrals';
 import { TikTokEvents } from '@/lib/tiktok';
+import { AppsFlyerEvents } from '@/lib/appsflyer';
 
 export const [AuthProvider, useAuth] = createContextHook(() => {
   const [session, setSession] = useState<Session | null>(null);
@@ -55,6 +56,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
       if (error) throw error;
       if (data.user) {
         void TikTokEvents.login(data.user.id, data.user.email ?? email);
+        void AppsFlyerEvents.login(data.user.id, data.user.email ?? email);
       }
       return data;
     },
@@ -106,6 +108,7 @@ export const [AuthProvider, useAuth] = createContextHook(() => {
         }
 
         void TikTokEvents.registration(data.user.id, email);
+        void AppsFlyerEvents.registration(data.user.id, email);
 
         if (referralCode?.trim()) {
           try {

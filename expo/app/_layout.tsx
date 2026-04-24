@@ -12,6 +12,7 @@ import { PaywallPromptProvider } from "@/providers/PaywallPromptProvider";
 import OnboardingScreen from "@/app/onboarding";
 import AnimatedSplash from "@/components/AnimatedSplash";
 import { trackAppOpen } from "@/lib/tiktok";
+import { trackAppsFlyerAppOpen } from "@/lib/appsflyer";
 
 
 const ONBOARDING_KEY = 'scentbuddy_onboarding_done';
@@ -45,6 +46,7 @@ function RootLayoutNav() {
     };
     void checkOnboarding();
     void trackAppOpen();
+    void trackAppsFlyerAppOpen();
   }, []);
 
   const handleSplashFinish = useCallback(() => {

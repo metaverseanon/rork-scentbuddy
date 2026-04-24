@@ -10,6 +10,7 @@ import createContextHook from '@nkzw/create-context-hook';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/providers/AuthProvider';
 import { TikTokEvents } from '@/lib/tiktok';
+import { AppsFlyerEvents } from '@/lib/appsflyer';
 
 function getRCApiKey(): string {
   if (Platform.OS === 'web') {
@@ -227,13 +228,16 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
         if (user?.id) {
           if (isTrial) {
             void TikTokEvents.startTrial(user.id, price, currency, productId);
+            void AppsFlyerEvents.startTrial(user.id, price, currency, productId);
           } else {
             void TikTokEvents.subscribe(user.id, price, currency, productId);
+            void AppsFlyerEvents.subscribe(user.id, price, currency, productId);
           }
           void TikTokEvents.purchase(user.id, price, currency, productId);
+          void AppsFlyerEvents.purchase(user.id, price, currency, productId);
         }
       } catch (e) {
-        console.log('[RevenueCat] TikTok track error:', e);
+        console.log('[RevenueCat] TikTok/AppsFlyer track error:', e);
       }
       return customerInfo;
     },
