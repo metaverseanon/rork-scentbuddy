@@ -12,14 +12,17 @@ import { useAuth } from '@/providers/AuthProvider';
 import { TikTokEvents } from '@/lib/tiktok';
 
 function getRCApiKey(): string {
-  if (__DEV__ || Platform.OS === 'web') {
+  if (Platform.OS === 'web') {
     return process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY ?? '';
   }
-  return Platform.select({
+  const platformKey = Platform.select({
     ios: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
     android: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
     default: process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY,
-  }) ?? '';
+  });
+  if (platformKey) return platformKey;
+  if (__DEV__) return process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY ?? '';
+  return process.env.EXPO_PUBLIC_REVENUECAT_TEST_API_KEY ?? '';
 }
 
 const RC_API_KEY = getRCApiKey();
@@ -27,27 +30,67 @@ const ENTITLEMENT_ID = 'Scent Buddy Pro';
 
 let rcConfigured = false;
 
-if (RC_API_KEY) {
+function tryConfigureRC(): boolean {
+  if (rcConfigured) return true;
+  if (Platform.OS === 'web') return false;
+  if (!RC_API_KEY) {
+    console.log('[RevenueCat] No API key available at configure time');
+    return false;
+  }
   try {
     Purchases.setLogLevel(LOG_LEVEL.DEBUG);
     Purchases.configure({ apiKey: RC_API_KEY });
     rcConfigured = true;
     console.log('[RevenueCat] Configured with key:', RC_API_KEY.substring(0, 12) + '...');
+    return true;
   } catch (e) {
     console.log('[RevenueCat] Configuration error:', e);
+    return false;
   }
-} else {
-  console.log('[RevenueCat] No API key found, skipping configuration');
 }
+
+tryConfigureRC();
 
 export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
   const { user, updateProfile } = useAuth();
   const queryClient = useQueryClient();
   const [isPro, setIsPro] = useState(false);
+  const [configured, setConfigured] = useState<boolean>(rcConfigured);
+
+  useEffect(() => {
+    if (configured) return;
+    if (Platform.OS === 'web') return;
+    let cancelled = false;
+    let attempts = 0;
+    const attempt = () => {
+      if (cancelled) return;
+      attempts += 1;
+      const ok = tryConfigureRC();
+      if (ok) {
+        console.log('[RevenueCat] Late configure succeeded on attempt', attempts);
+        if (!cancelled) {
+          setConfigured(true);
+          void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
+          void queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] });
+        }
+        return;
+      }
+      if (attempts < 6) {
+        setTimeout(attempt, 500 * attempts);
+      } else {
+        console.log('[RevenueCat] Gave up late configure after', attempts, 'attempts');
+      }
+    };
+    attempt();
+    return () => { cancelled = true; };
+  }, [configured, queryClient]);
 
   const customerInfoQuery = useQuery({
     queryKey: ['rc-customer-info'],
     queryFn: async () => {
+      if (!rcConfigured) {
+        tryConfigureRC();
+      }
       if (!rcConfigured) return null;
       try {
         const info = await Purchases.getCustomerInfo();
@@ -64,6 +107,9 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
   const offeringsQuery = useQuery({
     queryKey: ['rc-offerings'],
     queryFn: async () => {
+      if (!rcConfigured) {
+        tryConfigureRC();
+      }
       if (!rcConfigured) {
         console.log('[RevenueCat] Not configured, skipping offerings fetch');
         return null;
@@ -91,7 +137,7 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
     staleTime: 1000 * 60 * 5,
     retry: 5,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-    enabled: rcConfigured,
+    enabled: configured,
     refetchOnWindowFocus: false,
   });
 
@@ -240,11 +286,12 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
     restorePurchases: restoreMutation.mutateAsync,
     isRestoring: restoreMutation.isPending,
     restoreError: restoreMutation.error,
-    rcConfigured,
+    rcConfigured: configured,
     refetchOfferings,
     refreshCustomerInfo: () => queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] }),
   }), [
     isPro,
+    configured,
     customerInfoQuery.data,
     customerInfoQuery.isLoading,
     currentOffering,
