@@ -27,24 +27,33 @@ const PRO_FEATURES = [
   { icon: '☁️', title: 'Cloud Sync', desc: 'Seamless sync across all devices' },
 ];
 
+const IOS_MONTHLY_PRODUCT_ID = 'sb_monthly';
+const IOS_YEARLY_PRODUCT_ID = 'sb_yearly';
+
+function isAnnualPlan(pkg: PurchasesPackage | null): boolean {
+  if (!pkg) return false;
+  return pkg.product.identifier === IOS_YEARLY_PRODUCT_ID || pkg.identifier === '$rc_annual' || pkg.packageType === 'ANNUAL';
+}
+
+function isMonthlyPlan(pkg: PurchasesPackage | null): boolean {
+  if (!pkg) return false;
+  return pkg.product.identifier === IOS_MONTHLY_PRODUCT_ID || pkg.identifier === '$rc_monthly' || pkg.packageType === 'MONTHLY';
+}
+
 function formatPrice(pkg: PurchasesPackage): string {
-  const isAnnual = pkg.identifier === '$rc_annual' || pkg.packageType === 'ANNUAL';
   const product = pkg.product;
   if (product.priceString) return product.priceString;
-  return isAnnual ? '$41.94' : '$6.99';
+  return isAnnualPlan(pkg) ? '$41.94' : '$6.99';
 }
 
 function getPeriodLabel(pkg: PurchasesPackage): string {
-  const id = pkg.identifier;
-  if (id === '$rc_annual') return 'year';
-  if (id === '$rc_monthly') return 'month';
-  if (pkg.packageType === 'ANNUAL') return 'year';
-  if (pkg.packageType === 'MONTHLY') return 'month';
+  if (isAnnualPlan(pkg)) return 'year';
+  if (isMonthlyPlan(pkg)) return 'month';
   return 'period';
 }
 
 function getSavingsText(packages: PurchasesPackage[]): string | null {
-  const annual = packages.find(p => p.identifier === '$rc_annual' || p.packageType === 'ANNUAL');
+  const annual = packages.find(isAnnualPlan);
   if (!annual) return null;
   return 'Save 50%';
 }
@@ -81,7 +90,7 @@ export default function PaywallScreen() {
 
   useEffect(() => {
     if (packages.length > 0 && !selectedPkg) {
-      const annual = packages.find(p => p.identifier === '$rc_annual' || p.packageType === 'ANNUAL');
+      const annual = packages.find(isAnnualPlan);
       setSelectedPkg(annual ?? packages[0]);
     }
   }, [packages, selectedPkg]);
@@ -224,7 +233,7 @@ export default function PaywallScreen() {
             <Text style={[styles.sectionLabel, { color: colors.text }]}>Choose your plan</Text>
             {packages.map((pkg) => {
               const isSelected = selectedPkg?.identifier === pkg.identifier;
-              const isAnnual = pkg.identifier === '$rc_annual' || pkg.packageType === 'ANNUAL';
+              const isAnnual = isAnnualPlan(pkg);
               return (
                 <TouchableOpacity
                   key={pkg.identifier}
@@ -288,7 +297,7 @@ export default function PaywallScreen() {
             <>
               <Sparkle size={20} color="#fff" weight="fill" />
               <Text style={styles.purchaseBtnText}>
-                Continue with {selectedPkg?.identifier === '$rc_annual' || selectedPkg?.packageType === 'ANNUAL' ? 'Yearly' : 'Monthly'}
+                Continue with {isAnnualPlan(selectedPkg) ? 'Yearly' : 'Monthly'}
               </Text>
             </>
           )}
