@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { AppState, Platform } from 'react-native';
+import { AppState, NativeModules, Platform } from 'react-native';
 import Purchases, {
   CustomerInfo,
   PurchasesOffering,
+  PurchasesOfferings,
   PurchasesPackage,
   LOG_LEVEL,
 } from 'react-native-purchases';
@@ -31,125 +32,194 @@ function getRCApiKey(): string {
 
 const RC_API_KEY = getRCApiKey();
 const ENTITLEMENT_ID = 'Scent Buddy Pro';
+const CONFIGURATION_POLL_MS = 250;
+const CONFIGURATION_MAX_ATTEMPTS = 32;
 
+let rcConfigureStarted = false;
 let rcConfigured = false;
+let rcConfigurationError: string | null = null;
 
-function tryConfigureRC(): boolean {
-  if (rcConfigured) return true;
+function maskKey(key: string): string {
+  if (!key) return 'missing';
+  return `${key.slice(0, 12)}...${key.slice(-4)}`;
+}
+
+function normalizeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === 'string') return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return 'Unknown RevenueCat error';
+  }
+}
+
+function nativePurchasesAvailable(): boolean {
+  if (Platform.OS === 'web') return true;
+  return Boolean(NativeModules.RNPurchases);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function startRevenueCatConfiguration(appUserID?: string): boolean {
+  if (rcConfigured || rcConfigureStarted) return true;
   if (!RC_API_KEY) {
-    console.log('[RevenueCat] No API key available at configure time for platform:', Platform.OS, 'dev:', __DEV__);
+    rcConfigurationError = 'Missing RevenueCat production API key';
+    console.log('[RevenueCat] Missing API key for platform:', Platform.OS, 'dev:', __DEV__);
     return false;
   }
+  if (!nativePurchasesAvailable()) {
+    rcConfigurationError = 'RevenueCat native module is missing from this build';
+    console.log('[RevenueCat] Native module missing. Platform:', Platform.OS, 'native modules:', Object.keys(NativeModules).filter(key => key.toLowerCase().includes('purchase')));
+    return false;
+  }
+
   try {
-    Purchases.setLogLevel(LOG_LEVEL.DEBUG);
-    Purchases.configure({ apiKey: RC_API_KEY });
-    rcConfigured = true;
-    console.log('[RevenueCat] Configured with key:', RC_API_KEY.substring(0, 12) + '...', 'platform:', Platform.OS, 'dev:', __DEV__);
+    void Purchases.setLogLevel(__DEV__ ? LOG_LEVEL.DEBUG : LOG_LEVEL.WARN);
+    const config = appUserID
+      ? { apiKey: RC_API_KEY, appUserID, shouldShowInAppMessagesAutomatically: false }
+      : { apiKey: RC_API_KEY, shouldShowInAppMessagesAutomatically: false };
+    Purchases.configure(config);
+    rcConfigureStarted = true;
+    rcConfigurationError = null;
+    console.log('[RevenueCat] Configure started with key:', maskKey(RC_API_KEY), 'platform:', Platform.OS, 'dev:', __DEV__, 'hasUser:', Boolean(appUserID));
     return true;
-  } catch (e) {
-    console.log('[RevenueCat] Configuration error:', e);
+  } catch (error) {
+    rcConfigureStarted = false;
+    rcConfigured = false;
+    rcConfigurationError = normalizeError(error);
+    console.log('[RevenueCat] Configuration threw:', rcConfigurationError);
     return false;
   }
 }
 
-tryConfigureRC();
+async function ensureRevenueCatConfigured(appUserID?: string): Promise<boolean> {
+  if (rcConfigured) return true;
+  if (!startRevenueCatConfiguration(appUserID)) return false;
+
+  for (let attempt = 1; attempt <= CONFIGURATION_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const configured = await Purchases.isConfigured();
+      console.log('[RevenueCat] isConfigured check:', configured, 'attempt:', attempt);
+      if (configured) {
+        rcConfigured = true;
+        rcConfigurationError = null;
+        return true;
+      }
+    } catch (error) {
+      rcConfigurationError = normalizeError(error);
+      console.log('[RevenueCat] isConfigured error:', rcConfigurationError, 'attempt:', attempt);
+    }
+    await sleep(CONFIGURATION_POLL_MS);
+  }
+
+  rcConfigurationError = rcConfigurationError ?? 'RevenueCat did not finish configuring in time';
+  console.log('[RevenueCat] Configure timed out:', rcConfigurationError);
+  return false;
+}
+
+function selectOffering(offerings: PurchasesOfferings): PurchasesOffering | null {
+  if (offerings.current?.availablePackages?.length) return offerings.current;
+  const allOfferings = Object.values(offerings.all);
+  const firstWithPackages = allOfferings.find(offering => offering.availablePackages.length > 0);
+  if (firstWithPackages) {
+    console.log('[RevenueCat] Using fallback offering:', firstWithPackages.identifier);
+    return firstWithPackages;
+  }
+  return offerings.current ?? allOfferings[0] ?? null;
+}
+
+function hasProEntitlement(info: CustomerInfo | null): boolean {
+  if (!info) return false;
+  return typeof info.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
+}
 
 export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
   const { user, updateProfile } = useAuth();
   const queryClient = useQueryClient();
-  const [isPro, setIsPro] = useState(false);
+  const [isPro, setIsPro] = useState<boolean>(false);
   const [configured, setConfigured] = useState<boolean>(rcConfigured);
+  const [configurationError, setConfigurationError] = useState<string | null>(rcConfigurationError);
+  const [isInitializing, setIsInitializing] = useState<boolean>(!rcConfigured);
 
   useEffect(() => {
-    if (configured) return;
     let cancelled = false;
-    let attempts = 0;
-    const attempt = () => {
+    const init = async () => {
+      setIsInitializing(true);
+      const ok = await ensureRevenueCatConfigured(user?.id);
       if (cancelled) return;
-      attempts += 1;
-      const ok = tryConfigureRC();
+      setConfigured(ok);
+      setConfigurationError(rcConfigurationError);
+      setIsInitializing(false);
       if (ok) {
-        console.log('[RevenueCat] Configure succeeded on attempt', attempts);
-        if (!cancelled) {
-          setConfigured(true);
-          void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
-          void queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] });
-        }
-        return;
-      }
-      if (attempts < 6) {
-        setTimeout(attempt, 500 * attempts);
+        console.log('[RevenueCat] Configure confirmed');
+        void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
+        void queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] });
       } else {
-        console.log('[RevenueCat] Gave up late configure after', attempts, 'attempts');
+        console.log('[RevenueCat] Configure failed:', rcConfigurationError);
       }
     };
-    attempt();
+    void init();
     return () => { cancelled = true; };
-  }, [configured, queryClient]);
+  }, [queryClient, user?.id]);
 
   const customerInfoQuery = useQuery({
     queryKey: ['rc-customer-info'],
     queryFn: async () => {
-      if (!rcConfigured) {
-        tryConfigureRC();
+      const ok = await ensureRevenueCatConfigured(user?.id);
+      if (!ok) {
+        console.log('[RevenueCat] Customer info skipped, not configured:', rcConfigurationError);
+        return null;
       }
-      if (!rcConfigured) return null;
       try {
         const info = await Purchases.getCustomerInfo();
-        console.log('[RevenueCat] Customer info fetched:', JSON.stringify(info.entitlements.active));
+        console.log('[RevenueCat] Customer info fetched. Active entitlements:', Object.keys(info.entitlements.active));
         return info;
-      } catch (e) {
-        console.log('[RevenueCat] Error fetching customer info:', e);
+      } catch (error) {
+        console.log('[RevenueCat] Error fetching customer info:', normalizeError(error));
         return null;
       }
     },
     staleTime: 1000 * 60 * 5,
+    enabled: configured,
   });
 
   const offeringsQuery = useQuery({
     queryKey: ['rc-offerings'],
     queryFn: async () => {
-      if (!rcConfigured) {
-        tryConfigureRC();
-      }
-      if (!rcConfigured) {
-        console.log('[RevenueCat] Not configured, skipping offerings fetch');
+      const ok = await ensureRevenueCatConfigured(user?.id);
+      if (!ok) {
+        console.log('[RevenueCat] Offerings skipped, not configured:', rcConfigurationError);
         return null;
       }
-      try {
-        const offerings = await Purchases.getOfferings();
-        console.log('[RevenueCat] Offerings fetched. Current:', offerings.current?.identifier);
-        console.log('[RevenueCat] All offering keys:', Object.keys(offerings.all));
-        if (offerings.current) {
-          console.log('[RevenueCat] Available packages:', offerings.current.availablePackages.map(p => p.identifier));
-        } else {
-          console.log('[RevenueCat] WARNING: No current offering set in RevenueCat dashboard!');
-          const allKeys = Object.keys(offerings.all);
-          if (allKeys.length > 0) {
-            console.log('[RevenueCat] Found non-current offerings:', allKeys, '- using first one as fallback');
-            return { ...offerings, current: offerings.all[allKeys[0]] };
-          }
-        }
-        return offerings;
-      } catch (e) {
-        console.log('[RevenueCat] Error fetching offerings:', e);
-        throw e;
+      const offerings = await Purchases.getOfferings();
+      const current = selectOffering(offerings);
+      console.log('[RevenueCat] Offerings fetched. Current:', offerings.current?.identifier, 'selected:', current?.identifier, 'all:', Object.keys(offerings.all));
+      if (current) {
+        console.log('[RevenueCat] Available packages:', current.availablePackages.map(pkg => `${pkg.identifier}:${pkg.product.identifier}:${pkg.product.priceString}`).join(', '));
+      } else {
+        console.log('[RevenueCat] No offerings available from RevenueCat');
       }
+      return current ? { ...offerings, current } : offerings;
     },
     staleTime: 1000 * 60 * 5,
     retry: 5,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    retryDelay: attempt => Math.min(1000 * 2 ** attempt, 8000),
     enabled: configured,
     refetchOnWindowFocus: false,
   });
 
   const loggedInUserRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!rcConfigured || !user?.id) return;
+    if (!configured || !user?.id) return;
     if (loggedInUserRef.current === user.id) return;
     let cancelled = false;
     const loginToRC = async () => {
       try {
+        const ok = await ensureRevenueCatConfigured(user.id);
+        if (!ok) return;
         const { customerInfo } = await Purchases.logIn(user.id);
         if (!cancelled) {
           loggedInUserRef.current = user.id;
@@ -157,19 +227,19 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
           queryClient.setQueryData(['rc-customer-info'], customerInfo);
           void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
         }
-      } catch (e) {
+      } catch (error) {
         if (!cancelled) {
-          console.log('[RevenueCat] Login error:', e);
+          console.log('[RevenueCat] Login error:', normalizeError(error));
         }
       }
     };
     void loginToRC();
     return () => { cancelled = true; };
-  }, [user?.id, queryClient]);
+  }, [configured, user?.id, queryClient]);
 
   useEffect(() => {
-    if (!rcConfigured) return;
-    const sub = AppState.addEventListener('change', (state) => {
+    if (!configured) return;
+    const sub = AppState.addEventListener('change', state => {
       if (state === 'active') {
         console.log('[RevenueCat] App became active, refreshing offerings & customer info');
         void queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
@@ -177,49 +247,48 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
       }
     });
     return () => sub.remove();
-  }, [queryClient]);
+  }, [configured, queryClient]);
 
   useEffect(() => {
-    if (!rcConfigured) return;
+    if (!configured) return;
     let removed = false;
-    const listener = Purchases.addCustomerInfoUpdateListener((info: CustomerInfo) => {
+    const customerInfoListener = (info: CustomerInfo) => {
       if (removed) return;
-      console.log('[RevenueCat] Customer info updated via listener');
+      console.log('[RevenueCat] Customer info updated via listener. Active entitlements:', Object.keys(info.entitlements.active));
       queryClient.setQueryData(['rc-customer-info'], info);
-    });
+    };
+    Purchases.addCustomerInfoUpdateListener(customerInfoListener);
     return () => {
       removed = true;
       try {
-        listener.remove();
-      } catch (e) {
-        console.log('[RevenueCat] Listener cleanup error (safe to ignore):', e);
+        Purchases.removeCustomerInfoUpdateListener(customerInfoListener);
+      } catch (error) {
+        console.log('[RevenueCat] Listener cleanup error:', normalizeError(error));
       }
     };
-  }, [queryClient]);
+  }, [configured, queryClient]);
 
   useEffect(() => {
-    const info = customerInfoQuery.data;
-    if (!info) {
-      setIsPro(false);
-      return;
-    }
-    const hasEntitlement = typeof info.entitlements.active[ENTITLEMENT_ID] !== 'undefined';
-    console.log('[RevenueCat] Has Pro entitlement:', hasEntitlement);
-    setIsPro(hasEntitlement);
+    const active = hasProEntitlement(customerInfoQuery.data ?? null);
+    console.log('[RevenueCat] Has Pro entitlement:', active);
+    setIsPro(active);
   }, [customerInfoQuery.data]);
 
   useEffect(() => {
     if (user?.id && isPro) {
-      updateProfile({ is_pro: true }).catch((e) =>
-        console.log('[RevenueCat] Failed to sync pro status to profile:', e)
+      updateProfile({ is_pro: true }).catch(error =>
+        console.log('[RevenueCat] Failed to sync pro status to profile:', normalizeError(error))
       );
     }
   }, [isPro, user?.id, updateProfile]);
 
   const purchaseMutation = useMutation({
     mutationFn: async (pkg: PurchasesPackage) => {
-      if (!tryConfigureRC()) throw new Error('Subscription service is still starting. Please try again in a moment.');
-      console.log('[RevenueCat] Purchasing package:', pkg.identifier);
+      const ok = await ensureRevenueCatConfigured(user?.id);
+      setConfigured(ok);
+      setConfigurationError(rcConfigurationError);
+      if (!ok) throw new Error(rcConfigurationError ?? 'Subscription service is unavailable. Please update the app and try again.');
+      console.log('[RevenueCat] Purchasing package:', pkg.identifier, 'product:', pkg.product.identifier, 'price:', pkg.product.priceString);
       const { customerInfo } = await Purchases.purchasePackage(pkg);
       try {
         const price = pkg.product.price;
@@ -237,53 +306,71 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
           void TikTokEvents.purchase(user.id, price, currency, productId);
           void AppsFlyerEvents.purchase(user.id, price, currency, productId);
         }
-      } catch (e) {
-        console.log('[RevenueCat] TikTok/AppsFlyer track error:', e);
+      } catch (error) {
+        console.log('[RevenueCat] TikTok/AppsFlyer track error:', normalizeError(error));
       }
       return customerInfo;
     },
-    onSuccess: (info) => {
+    onSuccess: info => {
       queryClient.setQueryData(['rc-customer-info'], info);
-      console.log('[RevenueCat] Purchase successful');
+      setIsPro(hasProEntitlement(info));
+      console.log('[RevenueCat] Purchase successful. Active entitlements:', Object.keys(info.entitlements.active));
     },
     onError: (error: any) => {
-      if (error.userCancelled) {
+      if (error?.userCancelled) {
         console.log('[RevenueCat] Purchase cancelled by user');
       } else {
-        console.log('[RevenueCat] Purchase error:', error.message);
+        console.log('[RevenueCat] Purchase error:', normalizeError(error));
       }
     },
   });
 
   const restoreMutation = useMutation({
     mutationFn: async () => {
-      if (!tryConfigureRC()) throw new Error('Subscription service is still starting. Please try again in a moment.');
+      const ok = await ensureRevenueCatConfigured(user?.id);
+      setConfigured(ok);
+      setConfigurationError(rcConfigurationError);
+      if (!ok) throw new Error(rcConfigurationError ?? 'Subscription service is unavailable. Please update the app and try again.');
       console.log('[RevenueCat] Restoring purchases...');
-      const info = await Purchases.restorePurchases();
-      return info;
+      return Purchases.restorePurchases();
     },
-    onSuccess: (info) => {
+    onSuccess: info => {
       queryClient.setQueryData(['rc-customer-info'], info);
-      console.log('[RevenueCat] Restore successful');
+      setIsPro(hasProEntitlement(info));
+      console.log('[RevenueCat] Restore successful. Active entitlements:', Object.keys(info.entitlements.active));
     },
     onError: (error: any) => {
-      console.log('[RevenueCat] Restore error:', error.message);
+      console.log('[RevenueCat] Restore error:', normalizeError(error));
     },
   });
 
   const currentOffering = offeringsQuery.data?.current ?? null;
 
-  const refetchOfferings = useCallback(() => {
+  const refetchOfferings = useCallback(async () => {
     console.log('[RevenueCat] Manually refetching offerings...');
-    return queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
-  }, [queryClient]);
+    const ok = await ensureRevenueCatConfigured(user?.id);
+    setConfigured(ok);
+    setConfigurationError(rcConfigurationError);
+    if (ok) {
+      await queryClient.invalidateQueries({ queryKey: ['rc-offerings'] });
+    }
+  }, [queryClient, user?.id]);
+
+  const refreshCustomerInfo = useCallback(async () => {
+    const ok = await ensureRevenueCatConfigured(user?.id);
+    setConfigured(ok);
+    setConfigurationError(rcConfigurationError);
+    if (ok) {
+      await queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] });
+    }
+  }, [queryClient, user?.id]);
 
   return useMemo(() => ({
     isPro,
     customerInfo: customerInfoQuery.data ?? null,
     currentOffering,
     packages: currentOffering?.availablePackages ?? [],
-    isLoadingOfferings: offeringsQuery.isLoading || offeringsQuery.isFetching,
+    isLoadingOfferings: isInitializing || offeringsQuery.isLoading || offeringsQuery.isFetching,
     isLoadingCustomerInfo: customerInfoQuery.isLoading,
     purchasePackage: purchaseMutation.mutateAsync,
     isPurchasing: purchaseMutation.isPending,
@@ -292,23 +379,28 @@ export const [RevenueCatProvider, useRevenueCat] = createContextHook(() => {
     isRestoring: restoreMutation.isPending,
     restoreError: restoreMutation.error,
     rcConfigured: configured,
+    rcConfigurationError: configurationError,
     refetchOfferings,
-    refreshCustomerInfo: () => queryClient.invalidateQueries({ queryKey: ['rc-customer-info'] }),
+    refreshCustomerInfo,
   }), [
     isPro,
     configured,
+    configurationError,
+    isInitializing,
     customerInfoQuery.data,
     customerInfoQuery.isLoading,
     currentOffering,
     offeringsQuery.isLoading,
     offeringsQuery.isFetching,
     refetchOfferings,
+    refreshCustomerInfo,
     purchaseMutation.mutateAsync,
     purchaseMutation.isPending,
     purchaseMutation.error,
     restoreMutation.mutateAsync,
     restoreMutation.isPending,
     restoreMutation.error,
-    queryClient,
   ]);
 });
+
+void startRevenueCatConfiguration();

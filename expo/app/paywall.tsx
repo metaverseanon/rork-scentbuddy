@@ -62,6 +62,7 @@ export default function PaywallScreen() {
     isRestoring,
     isPro,
     rcConfigured,
+    rcConfigurationError,
     refetchOfferings,
   } = useRevenueCat();
 
@@ -197,26 +198,24 @@ export default function PaywallScreen() {
               <>
                 <Text style={[styles.loadingText, { color: colors.subtext }]}>
                   {!rcConfigured
-                    ? 'Subscription service unavailable'
+                    ? 'Subscriptions are reconnecting'
                     : 'No plans available right now'}
                 </Text>
                 <Text style={[styles.hintText, { color: colors.subtext }]}>
                   {!rcConfigured
-                    ? 'Please try again on a mobile device'
+                    ? rcConfigurationError ?? 'Tap retry to reconnect to subscriptions.'
                     : 'Make sure you have an internet connection and try again'}
                 </Text>
-                {rcConfigured && (
-                  <TouchableOpacity
-                    style={[styles.retryBtn, { borderColor: colors.border }]}
-                    onPress={() => {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                      void refetchOfferings();
-                    }}
-                  >
-                    <ArrowCounterClockwise size={16} color={colors.accent} />
-                    <Text style={[styles.retryBtnText, { color: colors.accent }]}>Retry</Text>
-                  </TouchableOpacity>
-                )}
+                <TouchableOpacity
+                  style={[styles.retryBtn, { borderColor: colors.border }]}
+                  onPress={() => {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    void refetchOfferings();
+                  }}
+                >
+                  <ArrowCounterClockwise size={16} color={colors.accent} />
+                  <Text style={[styles.retryBtnText, { color: colors.accent }]}>Retry</Text>
+                </TouchableOpacity>
               </>
             )}
           </View>
