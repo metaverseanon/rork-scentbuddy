@@ -90,7 +90,7 @@ function RootLayoutNav() {
         <Stack.Screen name="user-profile" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="goals" options={{ headerShown: false, presentation: "card" }} />
         <Stack.Screen name="referrals" options={{ headerShown: false, presentation: "card" }} />
-        <Stack.Screen name="paywall" options={{ headerShown: false, presentation: "modal" }} />
+        <Stack.Screen name="paywall" options={{ headerShown: false, presentation: "fullScreenModal" }} />
       </Stack>
       {showSplash && <AnimatedSplash onFinish={handleSplashFinish} />}
     </>
