@@ -1,5 +1,4 @@
 import { supabase } from './supabase';
-import UPNG from 'upng-js';
 
 const REMOVAL_AI_API_URL = 'https://api.removal.ai/3.0/remove';
 const REMOVAL_AI_API_KEY = process.env.EXPO_PUBLIC_REMOVAL_AI_API_KEY || '';
@@ -214,99 +213,8 @@ export async function uploadCleanImage(
 }
 
 function trimTransparentPixels(base64Data: string): string {
-  try {
-    console.log('[IMAGE-PROCESSING] Trimming transparent pixels using UPNG (cross-platform)...');
-
-    const binaryStr = atob(base64Data);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
-    }
-
-    const decoded = UPNG.decode(bytes.buffer);
-    const width = decoded.width;
-    const height = decoded.height;
-    console.log(`[IMAGE-PROCESSING] Decoded PNG: ${width}x${height}`);
-
-    const frames = UPNG.toRGBA8(decoded);
-    if (!frames || frames.length === 0) {
-      console.log('[IMAGE-PROCESSING] No frames found in PNG');
-      return base64Data;
-    }
-
-    const rgba = new Uint8Array(frames[0]);
-    const ALPHA_THRESHOLD = 20;
-
-    let top = height;
-    let left = width;
-    let right = 0;
-    let bottom = 0;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const alpha = rgba[(y * width + x) * 4 + 3];
-        if (alpha > ALPHA_THRESHOLD) {
-          if (y < top) top = y;
-          if (y > bottom) bottom = y;
-          if (x < left) left = x;
-          if (x > right) right = x;
-        }
-      }
-    }
-
-    if (top >= bottom || left >= right) {
-      console.log('[IMAGE-PROCESSING] No visible content found, skipping trim');
-      return base64Data;
-    }
-
-    const PAD = 4;
-    top = Math.max(0, top - PAD);
-    left = Math.max(0, left - PAD);
-    bottom = Math.min(height - 1, bottom + PAD);
-    right = Math.min(width - 1, right + PAD);
-
-    const croppedW = right - left + 1;
-    const croppedH = bottom - top + 1;
-
-    const removedPct = Math.round((1 - (croppedW * croppedH) / (width * height)) * 100);
-    console.log(`[IMAGE-PROCESSING] Crop: ${width}x${height} -> ${croppedW}x${croppedH} (removed ${removedPct}% empty space)`);
-
-    if (removedPct < 3) {
-      console.log('[IMAGE-PROCESSING] Less than 3% empty space, skipping trim');
-      return base64Data;
-    }
-
-    const croppedRgba = new Uint8Array(croppedW * croppedH * 4);
-    for (let y = 0; y < croppedH; y++) {
-      const srcOffset = ((top + y) * width + left) * 4;
-      const dstOffset = y * croppedW * 4;
-      croppedRgba.set(rgba.slice(srcOffset, srcOffset + croppedW * 4), dstOffset);
-    }
-
-    const encodedPng = UPNG.encode(
-      [croppedRgba.buffer],
-      croppedW,
-      croppedH,
-      0,
-    );
-
-    const encodedBytes = new Uint8Array(encodedPng);
-    let result = '';
-    const CHUNK = 8192;
-    for (let i = 0; i < encodedBytes.length; i += CHUNK) {
-      result += String.fromCharCode.apply(
-        null,
-        Array.from(encodedBytes.subarray(i, i + CHUNK)),
-      );
-    }
-    const trimmedBase64 = btoa(result);
-
-    console.log('[IMAGE-PROCESSING] Trim complete, new base64 length:', trimmedBase64.length);
-    return trimmedBase64;
-  } catch (error) {
-    console.log('[IMAGE-PROCESSING] trimTransparentPixels error:', error);
-    return base64Data;
-  }
+  console.log('[IMAGE-PROCESSING] Trim skipped to keep production publish bundle lean');
+  return base64Data;
 }
 
 export async function processFragranceImage(
